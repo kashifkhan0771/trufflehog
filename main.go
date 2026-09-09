@@ -30,6 +30,7 @@ import (
 	"github.com/trufflesecurity/trufflehog/v3/pkg/config"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/context"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/detectors/defs"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/engine"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/engine/defaults"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/feature"
@@ -69,6 +70,7 @@ var (
 	scanEntireChunk            = cli.Flag("scan-entire-chunk", "Scan the entire chunk for secrets.").Hidden().Default("false").Bool()
 	maxDecodeDepth             = cli.Flag("max-decode-depth", "Maximum depth of iterative decoding. Each decoder's output is fed back through all decoders, up to this limit. 1 = single pass, 2+ = chained decoding (e.g., base64 inside utf16).").Default("5").Int()
 	compareDetectionStrategies = cli.Flag("compare-detection-strategies", "Compare different detection strategies for matching spans").Hidden().Default("false").Bool()
+	useRuleDetectors           = cli.Flag("use-rule-detectors", "Use the rule-based implementation for detectors that have one.").Hidden().Default("false").Bool()
 	configFilename             = cli.Flag("config", "Path to configuration file.").ExistingFile()
 	// rules = cli.Flag("rules", "Path to file with custom rules.").String()
 	printAvgDetectorTime = cli.Flag("print-avg-detector-time", "Print the average time spent on each detector.").Bool()
@@ -632,6 +634,12 @@ func run(state overseer.State, logSync func() error) {
 
 	verificationCacheMetrics := verificationcache.InMemoryMetrics{}
 
+	defaultDetectors := defaults.DefaultDetectors()
+	if *useRuleDetectors {
+		defaultDetectors = defs.Replace(defaultDetectors, nil)
+		logger.Info("using rule-based detectors where available")
+	}
+
 	engConf := engine.Config{
 		Concurrency:       *concurrency,
 		ConfiguredSources: conf.Sources,
@@ -639,7 +647,7 @@ func run(state overseer.State, logSync func() error) {
 		// default detectors, which can be further filtered by the
 		// user. The filters are applied by the engine and are only
 		// subtractive.
-		Detectors:                append(defaults.DefaultDetectors(), conf.Detectors...),
+		Detectors:                append(defaultDetectors, conf.Detectors...),
 		Verify:                   !*noVerification,
 		IncludeDetectors:         *includeDetectors,
 		ExcludeDetectors:         *excludeDetectors,
