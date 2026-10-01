@@ -65,6 +65,14 @@ test-detectors: ## Run detector tests
 test-community: ## Run a subset of tests intended for use by the OSS community
 	CGO_ENABLED=0 go test -timeout=5m $(shell go list ./... | grep -v /vendor/ | grep -v pkg/sources | grep -v pkg/analyzer/analyzers)
 
+rule: ## Generate a new rule skeleton in pkg/rules/builtin (make rule NAME=Beehiiv)
+	@test -n "$(NAME)" || (echo "usage: make rule NAME=Beehiiv" && exit 2)
+	CGO_ENABLED=0 go run ./hack/newrule $(NAME)
+
+rule-from-detector: ## Generate a rule from the hand-written detector of that type (make rule-from-detector NAME=Bugherd)
+	@test -n "$(NAME)" || (echo "usage: make rule-from-detector NAME=Bugherd" && exit 2)
+	CGO_ENABLED=0 go run ./hack/newrule -from $(NAME)
+
 bench: ## Run benchmarks
 	CGO_ENABLED=0 go test $(shell go list ./pkg/secrets/... | grep -v /vendor/) -benchmem -run=xxx -bench .
 
