@@ -36,6 +36,7 @@ import (
 	"github.com/trufflesecurity/trufflehog/v3/pkg/handlers"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/log"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/output"
+	"github.com/trufflesecurity/trufflehog/v3/pkg/rules/builtin"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/sources"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/tui"
 	"github.com/trufflesecurity/trufflehog/v3/pkg/updater"
@@ -70,6 +71,7 @@ var (
 	scanEntireChunk            = cli.Flag("scan-entire-chunk", "Scan the entire chunk for secrets.").Hidden().Default("false").Bool()
 	maxDecodeDepth             = cli.Flag("max-decode-depth", "Maximum depth of iterative decoding. Each decoder's output is fed back through all decoders, up to this limit. 1 = single pass, 2+ = chained decoding (e.g., base64 inside utf16).").Default("5").Int()
 	compareDetectionStrategies = cli.Flag("compare-detection-strategies", "Compare different detection strategies for matching spans").Hidden().Default("false").Bool()
+	useRuleDetectors           = cli.Flag("use-rule-detectors", "Use the rule-based implementation for detectors that have one.").Hidden().Default("false").Bool()
 	configFilename             = cli.Flag("config", "Path to configuration file.").ExistingFile()
 	// rules = cli.Flag("rules", "Path to file with custom rules.").String()
 	printAvgDetectorTime = cli.Flag("print-avg-detector-time", "Print the average time spent on each detector.").Bool()
@@ -645,6 +647,12 @@ func run(state overseer.State, logSync func() error) {
 
 	verificationCacheMetrics := verificationcache.InMemoryMetrics{}
 
+	defaultDetectors := defaults.DefaultDetectors()
+	if *useRuleDetectors {
+		defaultDetectors = replaceWithRules(defaultDetectors, logFatal)
+		logger.Info("using rule-based detectors where available")
+	}
+
 	engConf := engine.Config{
 		Concurrency:       *concurrency,
 		ConfiguredSources: conf.Sources,
@@ -652,7 +660,7 @@ func run(state overseer.State, logSync func() error) {
 		// default detectors, which can be further filtered by the
 		// user. The filters are applied by the engine and are only
 		// subtractive.
-		Detectors:                append(defaults.DefaultDetectors(), conf.Detectors...),
+		Detectors:                append(defaultDetectors, conf.Detectors...),
 		Verify:                   !*noVerification,
 		IncludeDetectors:         *includeDetectors,
 		ExcludeDetectors:         *excludeDetectors,
@@ -1332,6 +1340,24 @@ func logFatalFunc(logger logr.Logger, logSync func() error) func(error, string, 
 		}
 		os.Exit(0)
 	}
+}
+
+// replaceWithRules swaps in the rule-backed detectors from builtin.Replace,
+// turning a panic from an invalid rule into a clean fatal error instead of a
+// raw stack trace.
+//
+// builtin.New panics on an invalid rule by design: a Rule is a package-level
+// value built at startup, so an invalid one is a mistake in the source, and
+// CI catches it before a release ships. This is the backstop for the case
+// that slips through anyway - a user should see what is wrong with the
+// rule, not a crash.
+func replaceWithRules(existing []detectors.Detector, logFatal func(error, string, ...any)) (result []detectors.Detector) {
+	defer func() {
+		if r := recover(); r != nil {
+			logFatal(fmt.Errorf("%v", r), "a rule-based detector failed validation")
+		}
+	}()
+	return builtin.Replace(existing, nil)
 }
 
 func commaSeparatedToSlice(s []string) []string {
